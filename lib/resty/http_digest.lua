@@ -135,8 +135,8 @@ function _M.new(_, opts)
         redis_host = opts.redis.host or '127.0.0.1',
         redis_port = opts.redis.port or 6379,
         redis_timeout = opts.redis.timeout or 1000,
-        redis_max_idle_timeout = opts.redis.max_idle_timeout,
-        redis_pool_size = opts.redis.pool_size,
+        redis_max_idle_timeout = opts.redis.keepalive_idle_timeout,
+        redis_pool_size = opts.redis.keepalive_pool_size,
     }
     return setmetatable(t, mt)
 end
