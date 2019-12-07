@@ -72,10 +72,13 @@ local function parse_authz_header(hdr)
         return nil, 'invalid authorization header'
     end
     local auth = {}
-    for k, v in str_gmatch(auth_str, '(%w+)="?([%w./=:;_?&+-]+)"?') do
+    -- `%` and `-` has special meaning in lua pattern
+    -- %% -> %
+    -- %- -> -
+    for k, v in str_gmatch(auth_str, '(%w+)="?([%w%%%-./=:;_?&+]+)"?') do
         auth[k] = v
     end
-    for _, field in pairs({'response', 'username', 'realm', 'uri', 'qop', 'cnonce', 'nc'}) do
+    for _, field in pairs({'response', 'username', 'realm', 'uri', 'qop', 'nonce', 'cnonce', 'nc'}) do
         if not auth[field] then
             return nil, 'missing field in authorization header: ' .. field
         end
@@ -87,20 +90,28 @@ _M.parse_authz_header = parse_authz_header
 local function make_digest_challenge(t)
     local challenge = 'Digest '
     for key, val in pairs(t) do
-        challenge = challenge .. key .. '="' .. tostring(val) .. '", '
+        if key == 'algorithm' or key == 'stale' then
+            -- not quoted
+            challenge = challenge .. key .. '=' .. tostring(val) .. ', '
+        else
+            challenge = challenge .. key .. '="' .. tostring(val) .. '", '
+        end
     end
-    return challenge .. 'qop="auth"'
+    return challenge .. 'qop="auth", opaque="session"'
 end
 
+local function calc_response(get_hash, username, realm, password, method, uri, nonce, nc, cnonce, qop)
+    local ha1 = get_hash(concat({username, realm, password}, ':'))
+    local ha2 = get_hash(method .. ':' .. uri)
+    return get_hash(concat({ha1, nonce, nc, cnonce, qop, ha2}, ':'))
+end
+_M.calc_response = calc_response
+
+local function make_redis_key(nonce)
+    return 'digest-nonce-v1:' .. nonce
+end
 
 function _M.new(_, opts)
-    -- :get_password: (username) -> password, err
-    -- :algorithm: MD5 | SHA256
-    -- :realm: ''
-    -- :nonce_age: 60
-    -- :auth_timeout: 60
-    -- :max_replays: 20
-    -- :redis: {}
     if opts.get_password == nil then
         return nil, 'get_password is required'
     end
@@ -122,7 +133,6 @@ function _M.new(_, opts)
         nonce_age = opts.nonce_age or 60,
         auth_timeout = opts.auth_timeout or 60,
         max_replays = opts.max_replays or 20,
-        debug = opts.debug,
         algo = algo,
         get_hash = get_hash,
 
@@ -147,7 +157,7 @@ function _M:verify(auth)
     local nc = auth.nc
     local nc_num = tonumber(nc, 16)
     local response = auth.response
-    local algorithm = auth.algorithm
+    local algorithm = auth.algorithm or MD5
     local password, err = self.get_password(username)
     if err then
         log(ngx.ERR, 'get password: ' .. username .. ': ' .. err)
@@ -157,7 +167,7 @@ function _M:verify(auth)
     if nc == nil or nc_num == nil then
         return HTTP_FORBIDDEN, 'invalid nc' .. auth.nc
     end
-    if ngx.var.uri ~= uri then
+    if ngx.var.request_uri ~= uri then
         -- return 400 if uri mismatched according to https://tools.ietf.org/html/rfc7616#section-3.4.6
         return HTTP_BAD_REQUEST, 'wrong uri: ' .. uri
     end
@@ -168,17 +178,7 @@ function _M:verify(auth)
         return HTTP_FORBIDDEN, 'wrong algorithm: ' .. algorithm
     end
 
-    local get_hash = self.get_hash
-
-    local ha1 = get_hash(concat({username, realm, password}, ':'))
-    local ha2 = get_hash(method .. ':' .. uri)
-    local expected_resp = get_hash(concat({ha1, nonce, nc, cnonce, qop, ha2}, ':'))
-    if self.debug then
-        ngx.log(ngx.INFO, 'a1: ', concat({username, realm, password}, ':'))
-        ngx.log(ngx.INFO, 'a2: ', method .. ':' .. uri)
-        ngx.log(ngx.INFO, 'r: ', concat({ha1, nonce, nc, cnonce, qop, ha2}, ':'))
-        ngx.log(ngx.INFO, 'eresp: ', expected_resp, ' gresp: ', response)
-    end
+    local expected_resp = calc_response(self.get_hash, username, realm, password, method, uri, nonce, nc, cnonce, qop)
     if expected_resp ~= response then
         return HTTP_FORBIDDEN, 'invalid response'
     end
@@ -189,8 +189,9 @@ function _M:verify(auth)
         log(ngx.ERR, 'connect to redis: ' .. err)
         return HTTP_INTERNAL_SERVER_ERROR, 'failed to connect to redis'
     end
+    local key = make_redis_key(nonce)
     local val
-    val, err = red:get(nonce)
+    val, err = red:get(key)
     if err then
         log(ngx.ERR, 'redis get key: ' .. nonce .. ': ' .. err)
         return HTTP_INTERNAL_SERVER_ERROR, 'faield to get key from redis'
@@ -203,13 +204,13 @@ function _M:verify(auth)
         log(ngx.ERR, 'invalid nc saved in redis: ' .. val)
         return HTTP_INTERNAL_SERVER_ERROR, 'unknown nc saved in redis'
     end
-    if cur_nc > self.max_replays then
+    if cur_nc >= self.max_replays then
         return HTTP_UNAUTHORIZED, 'stale nonce'
     end
     if cur_nc < nc_num then
         red:multi()
-        red:incr(nonce)
-        red:expire(nonce, self.nonce_age)
+        red:incr(key)
+        red:expire(key, self.nonce_age)
         local _, exec_err = red:exec()
         if not exec_err then
             red:set_keepalive(self.redis_max_idle_timeout, self.redis_pool_size)
@@ -230,7 +231,6 @@ function _M:set_challenge(stale)
         realm = realm,
         algorithm = self.algo,
         nonce = nonce,
-        opaque = 'session',
         stale = stale,
     })
     local red, err = get_redis_conn(self.redis_host, self.redis_port, self.redis_db, self.redis_timeout)
@@ -238,9 +238,10 @@ function _M:set_challenge(stale)
         log(ngx.ERR, 'connect to redis: ' .. err)
         return err
     end
+    local key = make_redis_key(nonce)
     red:multi()
-    red:set(nonce, '0')
-    red:expire(nonce, self.auth_timeout)
+    red:set(key, '0')
+    red:expire(key, self.auth_timeout)
     local _, exec_err = red:exec()
     if not exec_err then
         red:set_keepalive(self.redis_max_idle_timeout, self.redis_pool_size)
@@ -250,34 +251,42 @@ function _M:set_challenge(stale)
     end
 end
 
-function _M:_challenge(status, stale)
+local function _challenge(self, stale)
     local err = self:set_challenge(stale)
     if err then
         ngx.status = HTTP_INTERNAL_SERVER_ERROR
         return err
     end
-    ngx.status = status
+    ngx.status = HTTP_UNAUTHORIZED
 end
 
 function _M:authenticate()
     local authz_header = ngx.var.http_authorization
     if not authz_header then
-        return self:_challenge(HTTP_UNAUTHORIZED)
+        local err = _challenge(self)
+        if err then
+            return nil, err
+        end
+        return nil, 'missing authorization header'
     end
 
     local auth, err = parse_authz_header(authz_header)
     if err then
         log(ngx.WARN, 'parse_authz_header: ' .. err)
         ngx.status = HTTP_FORBIDDEN
-        return 'digest-auth: parse_authz_header: ' .. err
+        return nil, 'parse_authz_header: ' .. err
     end
     local code, reason = self:verify(auth)
     if code == HTTP_UNAUTHORIZED then
         -- stale nonce or authentication timed-out
-        return self:_challenge(code, true)
+        err = _challenge(self, true)
+        if err then
+            return nil, err
+        end
+        return nil, 'expired nonce'
     end
     ngx.status = code
-    return reason
+    return auth, reason
 end
 
 return _M
