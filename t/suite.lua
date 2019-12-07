@@ -1,8 +1,15 @@
 local resty_redis = require 'resty.redis'
 local resty_sha256 = require 'resty.sha256'
-local resty_str = require "resty.string"
+local resty_str = require 'resty.string'
+local http_digest = require 'resty.http_digest'
 
 return {
+    parse_authz_header = http_digest.parse_authz_header,
+
+    calc_response = http_digest.calc_response,
+
+    new_digest_auth = http_digest.new,
+
     get_redis_conn = function(host, port, db)
         local red = resty_redis:new()
         red:set_timeout(1000)
@@ -20,15 +27,7 @@ return {
 
     parse_www_authn_header = function()
         local hdr = ngx.resp.get_headers()['www-authenticate']
-        local auth_str = string.match(hdr, 'Digest%s+(.+)')
-        if auth_str == nil then
-            return nil, 'invalid header'
-        end
-        local auth = {}
-        for k, v in string.gmatch(auth_str, '(%w+)="?([%w%%%-./=:;_?&+]+)"?') do
-            auth[k] = v
-        end
-        return auth
+        return http_digest.parse_authz_header(hdr)
     end,
 
     get_password = function(name) return name end,

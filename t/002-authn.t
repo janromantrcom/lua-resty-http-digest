@@ -15,8 +15,7 @@ location = /t {
             suite.die_here(500, 'connect redis: ' .. err)
         end
 
-        local http_digest = require 'resty.http_digest'
-        local t = http_digest:new({
+        local t = suite:new_digest_auth({
             get_password = suite.get_password,
             auth_timeout = 1,
             nonce_age = 1,
@@ -56,8 +55,7 @@ location = /t {
             suite.die_here(500, 'connect redis: ' .. err)
         end
 
-        local http_digest = require 'resty.http_digest'
-        local t = http_digest:new({
+        local t = suite:new_digest_auth({
             get_password = suite.get_password,
             auth_timeout = 5,
             nonce_age = 5,
@@ -101,8 +99,7 @@ location = /t {
             suite.die_here(500, 'connect redis: ' .. err)
         end
 
-        local http_digest = require 'resty.http_digest'
-        local t = http_digest:new({
+        local t = suite:new_digest_auth({
             get_password = suite.get_password,
             auth_timeout = 5,
             nonce_age = 5,
@@ -141,8 +138,7 @@ location = /t {
             suite.die_here(500, 'connect redis: ' .. err)
         end
 
-        local http_digest = require 'resty.http_digest'
-        local t = http_digest:new({
+        local t = suite:new_digest_auth({
             get_password = suite.get_password,
             auth_timeout = 5,
             nonce_age = 5,

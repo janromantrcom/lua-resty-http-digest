@@ -78,11 +78,6 @@ local function parse_authz_header(hdr)
     for k, v in str_gmatch(auth_str, '(%w+)="?([%w%%%-./=:;_?&+]+)"?') do
         auth[k] = v
     end
-    for _, field in pairs({'response', 'username', 'realm', 'uri', 'qop', 'nonce', 'cnonce', 'nc'}) do
-        if not auth[field] then
-            return nil, 'missing field in authorization header: ' .. field
-        end
-    end
     return auth
 end
 _M.parse_authz_header = parse_authz_header
@@ -275,6 +270,11 @@ function _M:authenticate()
         log(ngx.WARN, 'parse_authz_header: ' .. err)
         ngx.status = HTTP_FORBIDDEN
         return nil, 'parse_authz_header: ' .. err
+    end
+    for _, field in pairs({'response', 'username', 'realm', 'uri', 'qop', 'nonce', 'cnonce', 'nc'}) do
+        if not auth[field] then
+            return nil, 'missing field in authorization header: ' .. field
+        end
     end
     local code, reason = self:verify(auth)
     if code == HTTP_UNAUTHORIZED then
