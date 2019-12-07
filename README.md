@@ -16,15 +16,21 @@ Name
 
 lua-resty-http-digest
 
+[Back to TOC](#table-of-contents)
+
 Status
 ======
 
 beta
 
+[Back to TOC](#table-of-contents)
+
 Description
 ===========
 
 lua-resty-http-digest library implements "HTTP Digest Access Authentication"(specified by [RFC7616](https://tools.ietf.org/html/rfc7616)) in Lua for OpenResty.
+
+[Back to TOC](#table-of-contents)
 
 Synopsis
 ========
@@ -34,10 +40,6 @@ lua_package_path "/path/to/lua-resty-http-digest/lib/?.lua;;";
 
 location = /protected {
     access_by_lua_block {
-        local function get_password(name)
-            return 'root'
-        end
-
         local http_digest = require 'resty.http_digest'
         local t, err = http_digest:new({
             get_password = function(name) return 'root' end,
@@ -91,53 +93,54 @@ It accepts a `opts` table argument. The following options are supported:
 
 * `get_password`: a function that returns `(password, error)` for the given username.
 
-Required.
-
-The signature of this function is: `(username: string) -> (password: string, error)`
+    Required.
+    The signature of the function is: `(username: string) -> (password: string, error)`
 
 * `realm`
 
-Optional. Default: `ngx.var.http_host`
+    Optional. Default: `ngx.var.http_host`
 
-* `nonce_age`
+* `nonce_age`: TTL of nonce in seconds
 
-Optional. Default: `60`
+    Optional. Default: `60`
 
-* `auth_timeout`
+* `auth_timeout`: Specify how many seconds challenges will remain valid after server sends them to clients.
 
-Optional. Default: `60`
+    Optional. Default: `60`
 
-* `max_replays`
+* `max_replays`: The times that a nonce can be re-used.
 
-Optional. Default: `20`
+    Optional. Default: `20`
 
 * `algorithm`
 
-Optional. Default: `http_digest.MD5`. Available: `http_digest.MD5`, `http_digest.SHA256`
+    Optional. Default: `http_digest.MD5`. Available: `http_digest.MD5`, `http_digest.SHA256`
 
 * `redis.db`
 
-Optional. Default: `0`
+    Optional. Default: `0`
 
 * `redis.host`
 
-Optional. Default: `127.0.0.1`
+    Optional. Default: `127.0.0.1`
 
 * `redis.port`
 
-Optional. Default: `6379`
+    Optional. Default: `6379`
 
 * `redis.timeout`
 
-Optional. Default: `1000`(1 sec)
+    Optional. Default: `1000`(1 sec)
 
 * `redis.keepalive_idle_timeout`
 
-Optional. Default: `nil`
+    Optional. Default: `nil`.
+    See also https://github.com/openresty/lua-resty-redis#set_keepalive
 
 * `redis.keepalive_pool_size`
 
-Optional. Default: `nil`
+    Optional. Default: `nil`
+    See also https://github.com/openresty/lua-resty-redis#set_keepalive
 
 [Back to TOC](#table-of-contents)
 
@@ -166,7 +169,7 @@ Limitations
 Author
 ======
 
-GitHub @knight42
+GitHub [@knight42](https://github.com/knight42)
 
 [Back to TOC](#table-of-contents)
 
