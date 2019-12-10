@@ -58,6 +58,10 @@ local function get_redis_conn(host, port, db, timeout)
     return red
 end
 
+local function put_back_redis_conn(red, timeout, pool_size)
+    red:set_keepalive(timeout, pool_size)
+end
+
 local function is_null(v)
     return v == null or v == nil
 end
@@ -207,9 +211,8 @@ function _M:verify(auth)
         red:incr(key)
         red:expire(key, self.nonce_age)
         local _, exec_err = red:exec()
-        if not exec_err then
-            red:set_keepalive(self.redis_max_idle_timeout, self.redis_pool_size)
-        else
+        put_back_redis_conn(red, self.redis_max_idle_timeout, self.redis_pool_size)
+        if exec_err then
             log(ngx.ERR, 'redis exec: ' .. exec_err)
         end
     else
@@ -238,9 +241,8 @@ function _M:set_challenge(stale)
     red:set(key, '0')
     red:expire(key, self.auth_timeout)
     local _, exec_err = red:exec()
-    if not exec_err then
-        red:set_keepalive(self.redis_max_idle_timeout, self.redis_pool_size)
-    else
+    put_back_redis_conn(red, self.redis_max_idle_timeout, self.redis_pool_size)
+    if exec_err then
         log(ngx.ERR, 'redis exec: ' .. exec_err)
         return exec_err
     end
@@ -267,7 +269,6 @@ function _M:authenticate()
 
     local auth, err = parse_authz_header(authz_header)
     if err then
-        log(ngx.WARN, 'parse_authz_header: ' .. err)
         ngx.status = HTTP_FORBIDDEN
         return nil, 'parse_authz_header: ' .. err
     end
