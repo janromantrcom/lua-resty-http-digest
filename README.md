@@ -155,6 +155,10 @@ Validates the `Authorization` header and returns information extracted from `Aut
 Installation
 ============
 
+```
+$ opm get knight42/lua-resty-http-digest
+```
+
 [Back to TOC](#table-of-contents)
 
 Limitations
